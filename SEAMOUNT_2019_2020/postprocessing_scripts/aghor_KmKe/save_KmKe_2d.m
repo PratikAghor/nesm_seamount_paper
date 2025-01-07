@@ -1,0 +1,157 @@
+% 
+% Compute the kinetic energy transfer: horizontal Reynolds stress (HRS)
+% - Pratik Aghor, modified from get_KmKe.m
+% HRS= -[ <up up> dubar/dx + <up vp>  dubar/dy  ....
+%          <vp up> dvbar/dx + <vp vp>  dvbar/dy ]
+%     =  -<up(up.grad(ubar))+vp(up.grad(vbar))>
+%
+% Advection operators are used. Much easier in sigma coordinates.
+%
+% This is the method used in
+% Djakouré, S., P. Penven, B. Bourlès, J. Veitch and V. Koné, 
+% Coastally trapped eddies in the north of the Gulf of Guinea, 2014, J. Geophys. Res,
+% DOI: 10.1002/2014JC010243
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+
+% Assume mean and KmKe_3d with respect to that mean has been calculated and saved
+% only take a section of the saved KmKe_3d, vertically integrate to take mean b/w two verical levels
+% and save KmKe2D or take an hslice at a given vlevel (depth)
+ 
+clear all
+close all
+start_paths
+%%
+Mu = M; Lu = L-1; Mv = M-1; Lv = L;
+% read files and calculate mean (bar) values of u, v
+% indxRange = 1992:2800; % What time indices do you need?
+% indxRange = 469:3382; % entire year
+indxRange = 1040:1096; % May 12 - May 19, 2019
+% indxRange = 2104:2160; % Sept 22 - Sept 29, 2019
+% indxRange = 2120:2200;
+% indxRange = 2984:3040;
+case_type ='avg'; % 'instant' or 'avg'
+
+if(strcmp(case_type, 'instant'))
+    nt = 3040;
+elseif(strcmp(case_type, 'avg'))
+    % indxRange = 2120:2200; % What time indices do you need?
+    % indxRange = 469:3382; % entire year
+    % indxRange = 3080:3144; 
+    % indxRange = 3016:3072; % Jan 14 - Jan 20, 2020
+    nt0=indxRange(1);
+    [~, Nt] = size(indxRange);
+end
+
+vlevel_arr = ([-4500]);
+vlevel=vlevel_arr(1);
+
+
+% time_arr = zeros(Nt, 1);
+% ub=zeros(N, Mu, Lu);
+% vb=zeros(N, Mv, Lv);
+
+% KmKe_3d_indxRange = indxRange; % 469:3382;
+% [~, Nt] = size(KmKe_3d_indxRange);
+if(strcmp(case_type, 'instant'))
+    filename = strcat('seamount_2019_2020_instant_KmKe_3d_nt_',string(nt), '.nc');
+
+elseif(strcmp(case_type, 'avg'))
+    filename = strcat('seamount_2019_2020_KmKe_3d_nt_', string(indxRange(1)), '_', string(indxRange(Nt)), '.nc');
+end
+KmKe3D_avg = ncread(filename, 'KmKe');
+HRS3D_avg = ncread(filename, 'HRS');
+VRS3D_avg = ncread(filename, 'VRS');
+
+KmKe2D_avg = zeros(Ny, Nx);
+HRS2D_avg = zeros(Ny, Nx);
+VRS2D_avg = zeros(Ny, Nx);
+%----------------------------------------------------------------------------------
+
+%
+% Verticaly integrate
+%
+time=0;
+fname = sprintf([dirHR, 'SEAMOUNT_2019_2020_avg.%05d.nc'], time);
+hisfile = fname;
+zeta = pagetranspose(ncread(hisfile, 'zeta'));
+
+zr=zlevs(depth,zeta,theta_s,theta_b,hc,N,'r',Vtransform);
+zw=zlevs(depth,zeta,theta_s,theta_b,hc,N,'w',Vtransform);
+% mask=maskr;
+% mask(mask==0)=NaN;
+% [HRS2D,h0]=vintegr2(HRS,zw,zr,z01,z02);
+%----------------------------------------------------------------------------------
+% take a horizontal slice at a given vlevel, modified from get_hslice.m
+%
+% Read the 3d matrix and do the interpolation
+%
+KmKe_sigma=KmKe3D_avg;
+KmKe2D_avg = vinterp(KmKe_sigma,zr,vlevel);
+HRS2D_avg = vinterp(HRS3D_avg, zr, vlevel);
+VRS2D_avg = vinterp(VRS3D_avg, zr, vlevel);
+%----------------------------------------------------------------------------------
+
+%
+% Save time average
+%
+% save data into a netcdf file
+if(strcmp(case_type, 'instant'))
+    filename = strcat('seamount_2019_2020_instant_KmKe_2d_hslice_nt_',string(nt), '_vlevel_', string(vlevel), '.nc');
+elseif(strcmp(case_type, 'avg'))
+    filename = strcat('seamount_2019_2020_KmKe_2d_hslice_nt_',string(indxRange(1)), '_', ...
+    string(indxRange(Nt)), '_vlevel_', string(vlevel), '.nc');
+end
+
+ncid = netcdf.create(filename,'CLOBBER');
+x_len = netcdf.defDim(ncid, 'Nx', Nx);
+y_len = netcdf.defDim(ncid, 'Ny', Ny);
+% t_len = netcdf.defDim(ncid, 'Nt', Nt);
+one = netcdf.defDim(ncid, 'one', 1);
+netcdf.close(ncid);
+
+% define variables and attributes
+ncid = netcdf.open(filename,'WRITE');
+netcdf.reDef(ncid);
+
+
+hrs_varid = netcdf.defVar(ncid, 'HRS2D', 'double', [y_len x_len]);
+netcdf.putAtt(ncid, hrs_varid, 'description', 'time avg of hslice of HRS at a given vlevel');
+netcdf.putAtt(ncid, hrs_varid, 'units', 'm^2s^-3');
+netcdf.putAtt(ncid, hrs_varid, 'array dimensions', size(HRS2D_avg));
+
+vrs_varid = netcdf.defVar(ncid, 'VRS2D', 'double', [y_len x_len]);
+netcdf.putAtt(ncid, vrs_varid, 'description', 'time avg of hslice of VRS at a given vlevel');
+netcdf.putAtt(ncid, vrs_varid, 'units', 'm^2s^-3');
+netcdf.putAtt(ncid, vrs_varid, 'array dimensions', size(VRS2D_avg));
+
+rs_varid = netcdf.defVar(ncid, 'KmKe2D', 'double', [y_len x_len]);
+netcdf.putAtt(ncid, rs_varid, 'description', 'time avg of hslice of KmKe at a given vlevel');
+netcdf.putAtt(ncid, rs_varid, 'units', 'm^2s^-3');
+netcdf.putAtt(ncid, rs_varid, 'array dimensions', size(KmKe2D_avg));
+
+vlevel_varid = netcdf.defVar(ncid, 'vlevel', 'double', one);
+netcdf.putAtt(ncid, vlevel_varid, 'description', 'vlevel for horizontal slice (<0 means depth)');
+netcdf.putAtt(ncid, vlevel_varid, 'units', 'm');
+netcdf.putAtt(ncid, vlevel_varid, 'array dimensions', size(z01));
+
+% z02_varid = netcdf.defVar(ncid, 'z02', 'double', one);
+% netcdf.putAtt(ncid, z02_varid, 'description', 'z02 used for vertical integration');
+% netcdf.putAtt(ncid, z02_varid, 'units', 'm');
+% netcdf.putAtt(ncid, z02_varid, 'array dimensions', size(z02));
+
+% close define mode
+netcdf.endDef(ncid);
+%%
+% put values
+netcdf.putVar(ncid, vlevel_varid, vlevel); % start from 0
+% netcdf.putVar(ncid, z02_varid, z02); % start from 0
+netcdf.putVar(ncid, hrs_varid, HRS2D_avg); % start from 0
+netcdf.putVar(ncid, vrs_varid, VRS2D_avg); % start from 0
+netcdf.putVar(ncid, rs_varid, KmKe2D_avg); % start from 0
+% close netcdf file
+netcdf.close(ncid);
+disp('Done creating KmKe2D_avg at a given vlevel!')
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
